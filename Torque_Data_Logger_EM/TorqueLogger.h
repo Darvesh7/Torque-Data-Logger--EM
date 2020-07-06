@@ -9,11 +9,11 @@ typedef enum
 
 } motorState_t;
 
-class TORQUE
+class TorqueLogger
 {
     public:
 
-    TORQUE(PinName motorFlush);
+    TorqueLogger(PinName motorFlush);
 
     float getTorque(void);
     float getCurrent(void);
@@ -23,6 +23,7 @@ class TORQUE
 
     uint32_t getFlushCount(void);
     uint32_t getUsesCount(void);
+    uint32_t getServiceCount(void);
     uint8_t getRpm(void);
 
 
@@ -42,7 +43,7 @@ class TORQUE
 
     uint32_t _flushCount;
     uint32_t _UsesCount;
-    uint32_t _Services;
+    uint32_t _ServiceCount;
 
     float _Voltage;
     float _Current;
@@ -51,8 +52,8 @@ class TORQUE
 
     motorState_t _motorCurrentState;
    
-    void _flushPressed (void);
-    void _flushReleased (void);
-    void _flushHeld (void);
+    void _FlushPressed (void);
+    void _FlushReleased (void);
+    void _FlushHeld (void);
 
 };
