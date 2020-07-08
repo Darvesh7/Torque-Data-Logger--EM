@@ -13,59 +13,49 @@
 
 #include "platform/mbed_retarget.h"
 
+//////////////////////////
+/////// Buttons ////////// 
+/////////////////////////
+
 Ds3231 rtc(PB_9, PB_8);
 SDBlockDevice sd(SPI_MOSI, SPI_MISO, SPI_SCK, PA_9);
 FATFileSystem fs("sd", &sd);
 
+
+FILE *fd;
 time_t epoch_time;
-//////////////////////////
-/////// Buttons ////////// 
-/////////////////////////
-#define ENCPPR 2338
 
 PinDetect Flush_button (PC_13);
 Motor motor(PA_10,PB_3,PB_5,PB_4,PA_4);
-QEI encoder(PC_1,PC_0,NC,ENCPPR);
+QEI encoder(PC_1,PC_0,NC,2338);
 AnalogIn voltagePin(PA_0);
 ACS712 CurrentSensor(PA_1,1,30);
 
 
+//////////////////////////
+//////// Variables ///////
+/////////////////////////
 
-
-#define MIN_FILM 1000 
-#define P_THRES 250
-#define ONE_FLUSH 10000 
-#define VOLTAGE_FLAG 1
-
-float FILM_LEFT = 12000.0; 
-float FILM_LENGTH = 12000.0; 
 
 bool update_film_value = false;
 bool update_sensor_data = false;
-float FilmLeft = 0.0;
+
 int pulses = 0;
-int cummulative_pulses = 0;
 int flush_count = 0;
 
 volatile float Voltage = 0.0;
-float Current = 0.0;
-float Power = 0.0;
-float Torque = 0.0;
-
-
-
-
-
+volatile float Current = 0.0;
+volatile float Power = 0.0;
+volatile float Torque = 0.0;
 
 //////////////////////////
-/////RTOS Variables////// 
+////////////RTOS ///////// 
 /////////////////////////
 
 Semaphore motorSema(1);
 
 void SystemStates_thread(void const *name);
 void motorDrive_thread(void const *name); 
-
 
 Thread t1;
 Thread t2;
@@ -76,10 +66,6 @@ EventQueue queue;
 Timeout flush_end;
 Timer rpmTimer;
 
-uint32_t flags_read = 0;
-
-EventFlags event_flags;
-int SAMPLE_FLAG1 = 1;
 
 ////////////////////////
 /////RPM Variables////// 
@@ -91,41 +77,34 @@ const int fin = 1000 / upDatesPerSec;
 const float constant = 60.0 * upDatesPerSec / (ppr*2);
 float rpm;
 
-
-
 void start_flush(void);
 void end_flush(void);
 void setup_flush_button(void);
 void getTorque(void);
 void getRpm(void);
 
-FILE *fd;
+
 
 void setup()
 {
-    setup_flush_button();
-
-    t1.start(callback(motorDrive_thread, (void *)"MotorDriveThread"));
-    t2.start(callback(SystemStates_thread, (void *)"SystemStateThread"));
-
-
-    sysState_struct.sysMode = S_RUN;
-
     epoch_time = rtc.get_epoch();
 
     fs.mount(&sd);
 
     printf("Opening a new file, numbers.txt.");
     fd = fopen("/sd/testdata.txt", "w+");
-
     fprintf(fd, "%s\n",  ctime(&epoch_time));
 
     fclose(fd);
-    printf(" done.\n");
 
+    setup_flush_button();
 
+    t1.start(callback(motorDrive_thread, (void *)"MotorDriveThread"));
+    t2.start(callback(SystemStates_thread, (void *)"SystemStateThread"));
+
+    sysState_struct.sysMode = S_RUN;
+  
 }
-
 
 
 int main()
@@ -147,14 +126,13 @@ int main()
         
         update_film_value = false;
         }
-   
 
     }
 }
 
 
 
-void getVolatge()
+void getVoltage()
 {
     Voltage = voltagePin.read_u16()*(16.70/65535.00); 
 
@@ -166,14 +144,12 @@ void getCurrent()
 
 }
 
-
 void getPower()
 {
     Power = voltagePin.read_u16()*(16.70/65535.00) * float(CurrentSensor);
 
 }
-
-        
+       
 void getRpm(void)
 {
     
@@ -191,22 +167,16 @@ void getRpm(void)
         }
     }
    
-
 }
 
 void getTorque(void)
-{
-    while(1)
-    {
-    Torque = Power/(2*(2*3.14)*rpm);
-    }
-    
+{   
+    Torque = Power/(2*(2*3.14)*rpm);   
 }
 
 
 void start_flush(void)
 {
-    
     if(sysState_struct.sysMode == S_RUN)
     {
         if(motor._MState == MSTOP)
@@ -218,7 +188,6 @@ void start_flush(void)
        
         }
     }
- 
 }
 
 void end_flush(void)
@@ -231,8 +200,7 @@ void end_flush(void)
         update_film_value = true;   
         flush_end.attach(&end_flush, 0.1);//timeout to update data
     }
- 
-    
+   
 }
 
 
@@ -283,7 +251,6 @@ void motorDrive_thread(void const *name)
             break;
             case MA_Brake:
                 motor.brake();
-                VoltageThread.terminate();
             break;
             case MA_Stop:
                 motor.stop();
