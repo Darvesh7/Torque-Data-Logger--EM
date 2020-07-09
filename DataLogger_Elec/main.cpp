@@ -21,8 +21,6 @@ Ds3231 rtc(PB_9, PB_8);
 SDBlockDevice sd(SPI_MOSI, SPI_MISO, SPI_SCK, PA_9);
 FATFileSystem fs("sd", &sd);
 
-
-FILE *fd;
 time_t epoch_time;
 
 PinDetect Flush_button (PC_13);
@@ -82,20 +80,36 @@ void end_flush(void);
 void setup_flush_button(void);
 void getTorque(void);
 void getRpm(void);
+void getVoltage(void);
+void getCurrent(void);
+void getPower(void);
 
-
-
+void savetoSD(void);
+ double sum_1 = 0.0;
 void setup()
 {
+   
     epoch_time = rtc.get_epoch();
-
+    
+    sd.init();
     fs.mount(&sd);
 
-    printf("Opening a new file, numbers.txt.");
-    fd = fopen("/sd/testdata.txt", "w+");
-    fprintf(fd, "%s\n",  ctime(&epoch_time));
 
-    fclose(fd);
+    FILE * fd = fopen("/sd/testdata.txt", "r+");
+    if (fd != nullptr)
+    {
+        printf("SD Mounted");
+
+    }
+    else
+    {
+        FILE * fd = fopen("/sd/testdata.txt", "w+");
+        fclose(fd);
+        printf("File Closed\r\n");
+        sd.deinit();
+        fs.unmount();
+        printf("SD created new textfile\r\n");
+    }
 
     setup_flush_button();
 
@@ -110,17 +124,26 @@ void setup()
 int main()
 
 {
+    VoltageThread.start(getVoltage);
+    CurrentThread.start(getCurrent);
+    PowerThread.start(getPower);
+    RpmThread.start(getRpm);
   
     setup();
 
     while (true) 
     {
-    sleep();
+      
     
         if (update_film_value) 
         {
 
-        printf("Flush Count %d\n", flush_count);
+        printf("Voltage %2.2f\n", Voltage);
+        printf("Current %2.2f\n", Current);
+        printf("Power %2.2f\n", Power);
+        printf("RPM %2.2f\n", rpm);
+        
+        //savetoSD();
         pulses = 0;
         encoder.reset();
         
@@ -128,32 +151,79 @@ int main()
         }
 
     }
+
 }
 
+void savetoSD(void)
+{
+
+sd.init();
+fs.mount(&sd);
+
+FILE * fd = fopen("/sd/testdata.txt", "r+");
+
+    if (fd != nullptr)
+    {
+     //for (int i = 0; i < 10; i++) {
+     //       printf("\rWriting numbers (%d/%d)... ", i, 10);
+     //       fflush(stdout);
+     //       fprintf(fd, "    %d\n", i);
+         
+     //   }
+   
+
+    fprintf(fd, "    %d\n", flush_count); 
+    fprintf(fd, "    \n"); 
+
+
+    //fprintf(fd, "%s\n",  ctime(&epoch_time));
+    fclose(fd);
+    sd.deinit();
+    fs.unmount();
+
+    }
+
+}
 
 
 void getVoltage()
 {
+    while(true)
+    {
     Voltage = voltagePin.read_u16()*(16.70/65535.00); 
+    }
+    ThisThread::sleep_for(500);
 
 }
 
 void getCurrent()
 {
-    Current = float(CurrentSensor);
+    while(true)
+    {
+    
+    Current = abs(float(CurrentSensor));
+    
+    }
+
+    ThisThread::sleep_for(500);
 
 }
 
 void getPower()
 {
-    Power = voltagePin.read_u16()*(16.70/65535.00) * float(CurrentSensor);
+    while(true)
+    {
+    Power = (Voltage * Current);
+    //Power = voltagePin.read_u16()*(16.70/65535.00) * float(CurrentSensor);
+    }
+    ThisThread::sleep_for(500);
 
 }
        
 void getRpm(void)
 {
     
-    while(1)
+    while(true)
     {
         rpmTimer.start();
         if (rpmTimer.read_ms() - start > fin) 
@@ -166,6 +236,7 @@ void getRpm(void)
         rpmTimer.reset();
         }
     }
+    ThisThread::sleep_for(1000);
    
 }
 
@@ -177,6 +248,7 @@ void getTorque(void)
 
 void start_flush(void)
 {
+    //VoltageThread.start(getVoltage);
     if(sysState_struct.sysMode == S_RUN)
     {
         if(motor._MState == MSTOP)
@@ -258,6 +330,4 @@ void motorDrive_thread(void const *name)
         }
     }
 }
-
-
 
