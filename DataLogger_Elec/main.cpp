@@ -9,6 +9,8 @@
 #include "ds3231.h"
 #include <stdio.h>
 #include <errno.h>
+#include <string>
+using std::string;
 
 
 #include "platform/mbed_retarget.h"
@@ -22,6 +24,7 @@ SDBlockDevice sd(SPI_MOSI, SPI_MISO, SPI_SCK, PA_9);
 FATFileSystem fs("sd", &sd);
 
 time_t epoch_time;
+Timer t;
 
 PinDetect Flush_button (PC_13);
 Motor motor(PA_10,PB_3,PB_5,PB_4,PA_4);
@@ -29,40 +32,37 @@ QEI encoder(PC_1,PC_0,NC,2338);
 AnalogIn voltagePin(PA_0);
 ACS712 CurrentSensor(PA_1,1,30);
 
-
 //////////////////////////
 //////// Variables ///////
 /////////////////////////
 
 
 bool update_film_value = false;
-bool update_sensor_data = false;
+bool update_rpm_value = false;
 
-int pulses = 0;
 int flush_count = 0;
-
-volatile float Voltage = 0.0;
-volatile float Current = 0.0;
-volatile float Power = 0.0;
-volatile float Torque = 0.0;
+volatile float cummulative_rpm = 0.0;
 
 //////////////////////////
 ////////////RTOS ///////// 
 /////////////////////////
 
 Semaphore motorSema(1);
+Semaphore loggerSema(1);
 
 void SystemStates_thread(void const *name);
 void motorDrive_thread(void const *name); 
+void logger(void const *name);
 
 Thread t1;
 Thread t2;
-Thread VoltageThread, CurrentThread, PowerThread, RpmThread, TorqueThread;
+Thread loggerThread;
 
 EventFlags stateChanged;
 EventQueue queue;
 Timeout flush_end;
-Timer rpmTimer;
+
+FILE * fd;
 
 
 ////////////////////////
@@ -73,7 +73,7 @@ double ppr = 16;
 uint8_t upDatesPerSec = 2;
 const int fin = 1000 / upDatesPerSec;
 const float constant = 60.0 * upDatesPerSec / (ppr*2);
-float rpm;
+
 
 void start_flush(void);
 void end_flush(void);
@@ -85,165 +85,172 @@ void getCurrent(void);
 void getPower(void);
 
 void savetoSD(void);
- double sum_1 = 0.0;
+
+Serial pc(USBTX, USBRX);
+
+
 void setup()
 {
    
-    epoch_time = rtc.get_epoch();
+    pc.baud(115200);
     
     sd.init();
     fs.mount(&sd);
 
 
-    FILE * fd = fopen("/sd/testdata.txt", "r+");
+    fd = fopen("/sd/testdata.txt", "r+");
     if (fd != nullptr)
     {
-        printf("SD Mounted");
+        pc.printf("SD Mounted - Ready");
 
     }
     else
     {
-        FILE * fd = fopen("/sd/testdata.txt", "w+");
+        fd = fopen("/sd/testdata.txt", "w+");
         fclose(fd);
-        printf("File Closed\r\n");
+        pc.printf("File Closed\r\n");
         sd.deinit();
         fs.unmount();
-        printf("SD created new textfile\r\n");
+        pc.printf("Creating new file - No existing file found\r\n");
     }
 
     setup_flush_button();
 
     t1.start(callback(motorDrive_thread, (void *)"MotorDriveThread"));
     t2.start(callback(SystemStates_thread, (void *)"SystemStateThread"));
+    loggerThread.start(callback(logger, (void *)"DataLoggerThread"));
 
     sysState_struct.sysMode = S_RUN;
   
 }
 
 
+
+
 int main()
 
 {
-    VoltageThread.start(getVoltage);
-    CurrentThread.start(getCurrent);
-    PowerThread.start(getPower);
-    RpmThread.start(getRpm);
+
   
-    setup();
+    setup(); 
 
     while (true) 
     {
-      
+
+    }
+
+}
+
+bool sdopened = false;
+
+void logger(void const *name)
+{
+    volatile int currenttime = 0;
+    volatile float voltage = 0.0;
+    volatile float current = 0.0;
+    volatile int pulses = 0;
     
-        if (update_film_value) 
+    while(true)
+    {
+        if(loggerSema.try_acquire_until(20000))
         {
+            if (!sdopened)
+            {
+                sd.init();
+                fs.mount(&sd);
+                fd = fopen("/sd/testdata.txt", "a");
+                sdopened = (fd != nullptr);
+            }
 
-        printf("Voltage %2.2f\n", Voltage);
-        printf("Current %2.2f\n", Current);
-        printf("Power %2.2f\n", Power);
-        printf("RPM %2.2f\n", rpm);
+            voltage = voltagePin.read_u16() * (16.70 / 65535.00);
+            current = CurrentSensor;
+            pulses = encoder.getPulses();
+            currenttime = t.read_ms();
+
+            string logline;
+
+            logline.append(to_string(voltage) + ",");
+            logline.append(to_string(current) + ",");
+            logline.append(to_string(pulses) + ",");
+            logline.append(to_string(currenttime) + "\n");
+
+            pc.printf("%s", logline.c_str());
+
+            if (fd != nullptr)
+            {
+                fprintf(fd, "%s", logline.c_str());
+            }
+
+            encoder.reset();
+            t.reset();
+            ThisThread::sleep_for(100);
         
-        //savetoSD();
-        pulses = 0;
-        encoder.reset();
-        
-        update_film_value = false;
+            if(motor._MState == MFORWARD)
+            {
+                loggerSema.release();
+            }
+            else
+            {
+                if (fd != nullptr)
+                {
+                    fflush(stdout);
+                    fclose(fd);
+                    sd.deinit();
+                    fs.unmount();
+                    sdopened = false;
+                }
+            }
         }
-
     }
-
 }
 
-void savetoSD(void)
-{
+// void getPower()
+// {
+//     while(true)
+//     {
+//     Power = (Voltage * Current);
+//     //Power = voltagePin.read_u16()*(16.70/65535.00) * float(CurrentSensor);
+//     }
+//     ThisThread::sleep_for(500);
 
-sd.init();
-fs.mount(&sd);
-
-FILE * fd = fopen("/sd/testdata.txt", "r+");
-
-    if (fd != nullptr)
-    {
-     //for (int i = 0; i < 10; i++) {
-     //       printf("\rWriting numbers (%d/%d)... ", i, 10);
-     //       fflush(stdout);
-     //       fprintf(fd, "    %d\n", i);
-         
-     //   }
-   
-
-    fprintf(fd, "    %d\n", flush_count); 
-    fprintf(fd, "    \n"); 
-
-
-    //fprintf(fd, "%s\n",  ctime(&epoch_time));
-    fclose(fd);
-    sd.deinit();
-    fs.unmount();
-
-    }
-
-}
-
-
-void getVoltage()
-{
-    while(true)
-    {
-    Voltage = voltagePin.read_u16()*(16.70/65535.00); 
-    }
-    ThisThread::sleep_for(500);
-
-}
-
-void getCurrent()
-{
-    while(true)
-    {
-    
-    Current = abs(float(CurrentSensor));
-    
-    }
-
-    ThisThread::sleep_for(500);
-
-}
-
-void getPower()
-{
-    while(true)
-    {
-    Power = (Voltage * Current);
-    //Power = voltagePin.read_u16()*(16.70/65535.00) * float(CurrentSensor);
-    }
-    ThisThread::sleep_for(500);
-
-}
+// }
        
-void getRpm(void)
-{
+// void getRpm(void)
+// {
     
-    while(true)
-    {
-        rpmTimer.start();
-        if (rpmTimer.read_ms() - start > fin) 
-        {
-        start = rpmTimer.read_ms();
-        rpm = abs((encoder.getPulses() * (constant)/149.25));
-    
-        //printf("%2.2f\n", (rpm));
-        encoder.reset();
-        rpmTimer.reset();
-        }
-    }
-    ThisThread::sleep_for(1000);
-   
-}
+//     while(true)
+//     {
 
-void getTorque(void)
-{   
-    Torque = Power/(2*(2*3.14)*rpm);   
-}
+//             //rpmTimer.start();
+//             //if (rpmTimer.read_ms() - start > fin) 
+//             //{
+//             //start = rpmTimer.read_ms();
+        
+ //            rpm = abs((encoder.getPulses() * (constant)/149.25));
+//             //printf("RPM = %2.2f\n", (rpm));
+    
+//             encoder.reset();
+//             //cummulative_rpm = cummulative_rpm + rpm;
+//             //rpmTimer.reset();     
+//             //} 
+
+//         ThisThread::sleep_for(500);          
+//     }
+    
+   
+// }
+
+// void getTorque(void)
+// {   
+//     while(true)
+//     {
+
+//         Torque = Power/(2*(2*3.14)*rpm);   
+//         ThisThread::sleep_for(500);
+
+//     }
+
+// } 
 
 
 void start_flush(void)
@@ -253,10 +260,11 @@ void start_flush(void)
     {
         if(motor._MState == MSTOP)
         {
-
-        gMotorAction = MA_Forward;
-        motorSema.release();
-        flush_end.attach(&end_flush, 4.0); //timeout - duration of flush
+            gMotorAction = MA_Forward;
+            t.start();
+            motorSema.release();
+            loggerSema.release();
+            flush_end.attach(&end_flush, 4.0); //timeout - duration of flush
        
         }
     }
@@ -266,11 +274,11 @@ void end_flush(void)
 {
     if(motor._MState == MFORWARD)
     {
-        gMotorAction = MA_Stop;
+        gMotorAction = MA_Brake;
         motorSema.release();
         flush_count = flush_count + 1;
-        update_film_value = true;   
-        flush_end.attach(&end_flush, 0.1);//timeout to update data
+        update_film_value = true;  
+        t.stop(); 
     }
    
 }
@@ -316,7 +324,6 @@ void motorDrive_thread(void const *name)
         {
             case MA_Forward:
                 motor.forward();
-               
             break;
             case MA_Backward:
                 motor.backward();
@@ -326,6 +333,8 @@ void motorDrive_thread(void const *name)
             break;
             case MA_Stop:
                 motor.stop();
+
+
             break;
         }
     }
