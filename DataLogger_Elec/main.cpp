@@ -41,7 +41,7 @@ bool update_film_value = false;
 bool update_rpm_value = false;
 
 int flush_count = 0;
-volatile float cummulative_rpm = 0.0;
+
 
 //////////////////////////
 ////////////RTOS ///////// 
@@ -65,16 +65,6 @@ Timeout flush_end;
 FILE * fd;
 
 
-////////////////////////
-/////RPM Variables////// 
-///////////////////////
-unsigned long start = 0;
-double ppr = 16; 
-uint8_t upDatesPerSec = 2;
-const int fin = 1000 / upDatesPerSec;
-const float constant = 60.0 * upDatesPerSec / (ppr*2);
-
-
 void start_flush(void);
 void end_flush(void);
 void setup_flush_button(void);
@@ -93,12 +83,13 @@ void setup()
 {
    
     pc.baud(115200);
+
     
     sd.init();
     fs.mount(&sd);
 
 
-    fd = fopen("/sd/testdata.txt", "r+");
+    fd = fopen("/sd/testdata.csv", "r+");
     if (fd != nullptr)
     {
         pc.printf("SD Mounted - Ready");
@@ -106,7 +97,7 @@ void setup()
     }
     else
     {
-        fd = fopen("/sd/testdata.txt", "w+");
+        fd = fopen("/sd/testdata.csv", "w+");
         fclose(fd);
         pc.printf("File Closed\r\n");
         sd.deinit();
@@ -125,13 +116,11 @@ void setup()
 }
 
 
-
-
 int main()
 
 {
 
-  
+ 
     setup(); 
 
     while (true) 
@@ -149,36 +138,56 @@ void logger(void const *name)
     volatile float voltage = 0.0;
     volatile float current = 0.0;
     volatile int pulses = 0;
+    volatile float rpm = 0.0;
+    float RpmRatioConversion = ((600/32)*(1/149.25));
+    volatile float power = 0.0;
+    volatile float torque = 0.0;
+
+
     
     while(true)
     {
+        
+        epoch_time = rtc.get_epoch();
         if(loggerSema.try_acquire_until(20000))
         {
             if (!sdopened)
             {
                 sd.init();
                 fs.mount(&sd);
-                fd = fopen("/sd/testdata.txt", "a");
+                fd = fopen("/sd/testdata.csv", "a");
+                fflush(stdout);
+                fprintf(fd, "%s\n", ctime(&epoch_time));
                 sdopened = (fd != nullptr);
             }
 
             voltage = voltagePin.read_u16() * (16.70 / 65535.00);
-            current = CurrentSensor;
+            current = abs(CurrentSensor);
             pulses = encoder.getPulses();
             currenttime = t.read_ms();
+            rpm = (pulses*RpmRatioConversion);
+            power = voltage*current;
+            torque = ((power/(2*3.14*rpm)) * 60);
+
 
             string logline;
 
+            logline.append(to_string(flush_count) + ",");
             logline.append(to_string(voltage) + ",");
             logline.append(to_string(current) + ",");
+            logline.append(to_string(power)  + ",");
             logline.append(to_string(pulses) + ",");
-            logline.append(to_string(currenttime) + "\n");
+            logline.append(to_string(currenttime) + ",");
+            logline.append(to_string(rpm)  + ",");
+            logline.append(to_string(torque) + "\n");
 
             pc.printf("%s", logline.c_str());
 
             if (fd != nullptr)
             {
-                fprintf(fd, "%s", logline.c_str());
+                
+                fprintf(fd, " %s%s",",",logline.c_str());
+    
             }
 
             encoder.reset();
@@ -194,6 +203,7 @@ void logger(void const *name)
                 if (fd != nullptr)
                 {
                     fflush(stdout);
+                    fprintf(fd, "\r\n");
                     fclose(fd);
                     sd.deinit();
                     fs.unmount();
@@ -204,54 +214,6 @@ void logger(void const *name)
     }
 }
 
-// void getPower()
-// {
-//     while(true)
-//     {
-//     Power = (Voltage * Current);
-//     //Power = voltagePin.read_u16()*(16.70/65535.00) * float(CurrentSensor);
-//     }
-//     ThisThread::sleep_for(500);
-
-// }
-       
-// void getRpm(void)
-// {
-    
-//     while(true)
-//     {
-
-//             //rpmTimer.start();
-//             //if (rpmTimer.read_ms() - start > fin) 
-//             //{
-//             //start = rpmTimer.read_ms();
-        
- //            rpm = abs((encoder.getPulses() * (constant)/149.25));
-//             //printf("RPM = %2.2f\n", (rpm));
-    
-//             encoder.reset();
-//             //cummulative_rpm = cummulative_rpm + rpm;
-//             //rpmTimer.reset();     
-//             //} 
-
-//         ThisThread::sleep_for(500);          
-//     }
-    
-   
-// }
-
-// void getTorque(void)
-// {   
-//     while(true)
-//     {
-
-//         Torque = Power/(2*(2*3.14)*rpm);   
-//         ThisThread::sleep_for(500);
-
-//     }
-
-// } 
-
 
 void start_flush(void)
 {
@@ -260,6 +222,7 @@ void start_flush(void)
     {
         if(motor._MState == MSTOP)
         {
+            flush_count = flush_count + 1;
             gMotorAction = MA_Forward;
             t.start();
             motorSema.release();
@@ -276,7 +239,6 @@ void end_flush(void)
     {
         gMotorAction = MA_Brake;
         motorSema.release();
-        flush_count = flush_count + 1;
         update_film_value = true;  
         t.stop(); 
     }
@@ -333,7 +295,6 @@ void motorDrive_thread(void const *name)
             break;
             case MA_Stop:
                 motor.stop();
-
 
             break;
         }
