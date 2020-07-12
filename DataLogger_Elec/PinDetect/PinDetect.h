@@ -130,7 +130,7 @@ namespace AjK {
 class PinDetect {
 
 protected:
-    DigitalIn   *_in;
+    InterruptIn   *_in;
     Ticker      *_ticker;
     int         _prevState;
     int         _currentStateCounter;
@@ -158,13 +158,17 @@ protected:
         _samplesTillHeldReload   = PINDETECT_HOLD_COUNT;
         _assertValue             = PINDETECT_PIN_ASSTERED;
         
-        _in = new DigitalIn( p );
+    
+        _in = new InterruptIn( p );
         _in->mode( m );        
         _prevState = _in->read();        
         _ticker = new Ticker;
     }
     
 public:
+
+     
+
 
     friend class Ticker;
     

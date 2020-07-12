@@ -15,6 +15,7 @@ using std::string;
 
 #include "platform/mbed_retarget.h"
 
+
 //////////////////////////
 /////// Buttons ////////// 
 /////////////////////////
@@ -23,14 +24,18 @@ Ds3231 rtc(PB_9, PB_8);
 SDBlockDevice sd(SPI_MOSI, SPI_MISO, SPI_SCK, PA_9);
 FATFileSystem fs("sd", &sd);
 
-time_t epoch_time;
-Timer t;
-
-PinDetect Flush_button (PC_13);
+InterruptIn Flush_button (PC_13);
 Motor motor(PA_10,PB_3,PB_5,PB_4,PA_4);
 QEI encoder(PC_1,PC_0,NC,2338);
 AnalogIn voltagePin(PA_0);
 ACS712 CurrentSensor(PA_1,1,30);
+
+
+
+
+time_t epoch_time;
+LowPowerTimer t;
+
 
 //////////////////////////
 //////// Variables ///////
@@ -60,7 +65,7 @@ Thread loggerThread;
 
 EventFlags stateChanged;
 EventQueue queue;
-Timeout flush_end;
+LowPowerTimeout  flush_end;
 
 FILE * fd;
 
@@ -74,15 +79,25 @@ void getVoltage(void);
 void getCurrent(void);
 void getPower(void);
 
+void SetSysClock_PLL_HSE(void);
+
 void savetoSD(void);
 
 Serial pc(USBTX, USBRX);
 
 
+
+
 void setup()
 {
+
+
+
+  
    
     pc.baud(115200);
+    pc.printf("SystemCoreClock is %d Hz\r\n", SystemCoreClock);
+
 
     
     sd.init();
@@ -116,19 +131,69 @@ void setup()
 }
 
 
+
 int main()
 
 {
+    Flush_button.fall(&start_flush);
+    Flush_button.rise(&end_flush);
 
- 
     setup(); 
+    
 
     while (true) 
     {
+        if(update_film_value)
+        {
+            HAL_Delay(2000); //important to have Delay - > Give SD time to flush data.
+            update_film_value = false;
 
+
+
+
+            /* Enter Stop Mode */
+            HAL_SuspendTick();
+            HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
+            //HAL_PWR_EnterSTOPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+              /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
+                PLL as system clock source (HSE and PLL are disabled in STOP mode) */
+            SetSysClock();
+
+           HAL_ResumeTick();
+
+
+
+
+
+            AnalogIn voltagePin(PA_0);
+            ACS712 CurrentSensor(PA_1,1,30);
+
+
+            
+
+            setup(); 
+
+            
+         
+
+            pc.printf("exiting sleep mode");
+
+
+        }
+           
+   
     }
 
+
 }
+
+
+
+
+
+
+
 
 bool sdopened = false;
 
@@ -222,6 +287,7 @@ void start_flush(void)
     {
         if(motor._MState == MSTOP)
         {
+            
             flush_count = flush_count + 1;
             gMotorAction = MA_Forward;
             t.start();
@@ -235,12 +301,14 @@ void start_flush(void)
 
 void end_flush(void)
 {
+
     if(motor._MState == MFORWARD)
     {
         gMotorAction = MA_Brake;
         motorSema.release();
-        update_film_value = true;  
         t.stop(); 
+       
+        update_film_value = true;  
     }
    
 }
@@ -248,13 +316,13 @@ void end_flush(void)
 
 void setup_flush_button(void) 
 {
-    Flush_button.mode(PullUp);
-    Flush_button.attach_asserted(&start_flush);
-    Flush_button.attach_deasserted(&end_flush);
-    Flush_button.setSamplesTillAssert(10); // debounces 10 sample by
-    Flush_button.setAssertValue(0);        // state of the pin
-    Flush_button.setSampleFrequency();     // Defaults to 20ms.
-    Flush_button.setSamplesTillHeld( 100 );
+    //Flush_button.mode(PullUp);
+    //Flush_button.attach_asserted(&start_flush);
+    //Flush_button.attach_deasserted(&end_flush);
+    //Flush_button.setSamplesTillAssert(10); // debounces 10 sample by
+    //Flush_button.setAssertValue(0);        // state of the pin
+    //Flush_button.setSampleFrequency();     // Defaults to 20ms.
+    //Flush_button.setSamplesTillHeld( 100 );
 }
 
 
@@ -267,6 +335,7 @@ void SystemStates_thread(void const *name)
     {
     case S_RUN:
       sysState_struct.sysMode = S_RUN;
+      
     break;
 
     default:
@@ -284,7 +353,7 @@ void motorDrive_thread(void const *name)
         motorSema.acquire();
         switch(gMotorAction)
         {
-            case MA_Forward:
+            case MA_Forward:              
                 motor.forward();
             break;
             case MA_Backward:
