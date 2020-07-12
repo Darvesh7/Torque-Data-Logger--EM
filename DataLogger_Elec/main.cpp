@@ -86,24 +86,14 @@ void savetoSD(void);
 Serial pc(USBTX, USBRX);
 
 
-
-
-void setup()
+void init_SD(void)
 {
-
-
-
-  
-   
     pc.baud(115200);
-    pc.printf("SystemCoreClock is %d Hz\r\n", SystemCoreClock);
 
-
-    
     sd.init();
     fs.mount(&sd);
 
-
+   
     fd = fopen("/sd/testdata.csv", "r+");
     if (fd != nullptr)
     {
@@ -119,6 +109,12 @@ void setup()
         fs.unmount();
         pc.printf("Creating new file - No existing file found\r\n");
     }
+}
+
+void setup()
+{
+    pc.printf("SystemCoreClock is %d Hz\r\n", SystemCoreClock);
+
 
     setup_flush_button();
 
@@ -130,61 +126,61 @@ void setup()
   
 }
 
+void LowPowerConfiguration(void)
+{
+    RCC->AHBENR |= (RCC_AHBENR_GPIOAEN | RCC_AHBENR_GPIOBEN | RCC_AHBENR_GPIOCEN |
+                    RCC_AHBENR_GPIODEN | RCC_AHBENR_GPIOEEN |RCC_AHBENR_GPIOHEN);
+                    
+    GPIO_InitTypeDef GPIO_InitStruct;
+    // All other ports are analog input mode
+    GPIO_InitStruct.Pin = GPIO_PIN_All;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+    //HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    //HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    //HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+    
+    RCC->AHBENR &= ~(RCC_AHBENR_GPIOBEN  |RCC_AHBENR_GPIODEN|
+                    RCC_AHBENR_GPIODEN| RCC_AHBENR_GPIOEEN | RCC_AHBENR_GPIOHEN);
+}
+
 
 
 int main()
 
 {
-    Flush_button.fall(&start_flush);
-    Flush_button.rise(&end_flush);
-
-    setup(); 
     
+    init_SD();
+    setup(); 
+    Flush_button.fall(&start_flush);
+    Flush_button.rise(&end_flush);  
 
     while (true) 
     {
         if(update_film_value)
         {
-            HAL_Delay(2000); //important to have Delay - > Give SD time to flush data.
+            HAL_Delay(1000); //important to have Delay - > Give SD time to flush data.
             update_film_value = false;
-
-
-
-
+            LowPowerConfiguration();
             /* Enter Stop Mode */
             HAL_SuspendTick();
             HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 
-            //HAL_PWR_EnterSTOPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
-              /* Configures system clock after wake-up from STOP: enable HSE, PLL and select
-                PLL as system clock source (HSE and PLL are disabled in STOP mode) */
             SetSysClock();
 
-           HAL_ResumeTick();
-
-
-
-
+            HAL_ResumeTick();
 
             AnalogIn voltagePin(PA_0);
             ACS712 CurrentSensor(PA_1,1,30);
-
-
-            
-
-            setup(); 
-
-            
-         
-
+            setup();       
             pc.printf("exiting sleep mode");
-
-
-        }
-           
+        }          
    
     }
-
 
 }
 
@@ -309,6 +305,7 @@ void end_flush(void)
         t.stop(); 
        
         update_film_value = true;  
+        flush_end.attach(&end_flush, 0.1); //timeout - duration of flush
     }
    
 }
@@ -369,4 +366,3 @@ void motorDrive_thread(void const *name)
         }
     }
 }
-

@@ -20,7 +20,7 @@ class Motor
     PinName INB,
     PinName PWM,
     PinName SEL0, 
-    PinName PA_1);
+    PinName CS);
 
     void init(void);
 
