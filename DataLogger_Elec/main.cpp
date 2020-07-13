@@ -138,14 +138,13 @@ void LowPowerConfiguration(void)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
     //HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-    //HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
     //HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
     HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
     HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
     
-    RCC->AHBENR &= ~(RCC_AHBENR_GPIOBEN  |RCC_AHBENR_GPIODEN|
-                    RCC_AHBENR_GPIODEN| RCC_AHBENR_GPIOEEN | RCC_AHBENR_GPIOHEN);
+    RCC->AHBENR &= ~(RCC_AHBENR_GPIOBEN | RCC_AHBENR_GPIODEN| RCC_AHBENR_GPIOEEN | RCC_AHBENR_GPIOHEN);
 }
 
 
@@ -163,9 +162,13 @@ int main()
     {
         if(update_film_value)
         {
-            HAL_Delay(1000); //important to have Delay - > Give SD time to flush data.
+            ThisThread::sleep_for(200); //important to have Delay - > Give SD time to flush data.
             update_film_value = false;
             LowPowerConfiguration();
+            Motor motor(PA_10,PB_3,PB_5,PB_4,PA_4);
+            Ds3231 rtc(PB_9, PB_8);
+            epoch_time = rtc.get_epoch();
+            ThisThread::sleep_for(800);
             /* Enter Stop Mode */
             HAL_SuspendTick();
             HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -173,6 +176,7 @@ int main()
             SetSysClock();
 
             HAL_ResumeTick();
+        
 
             AnalogIn voltagePin(PA_0);
             ACS712 CurrentSensor(PA_1,1,30);
