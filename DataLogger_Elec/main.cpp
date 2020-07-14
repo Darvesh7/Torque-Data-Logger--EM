@@ -158,20 +158,34 @@ int main()
     Flush_button.fall(&start_flush);
     Flush_button.rise(&end_flush);  
 
+
     while (true) 
     {
         if(update_film_value)
         {
+
             ThisThread::sleep_for(200); //important to have Delay - > Give SD time to flush data.
             update_film_value = false;
             LowPowerConfiguration();
+            // Enable PWR clock
+            RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+            // Clear previous wakeup event
+            PWR->CR |= (PWR_CR_CSBF);
+            // Enable WKUP2 (PC_13)
+            PWR->CSR |= PWR_CSR_EWUP2;
+            // Enter Standby Mode
+            HAL_PWR_EnterSTANDBYMode();
+
+        /*
             Motor motor(PA_10,PB_3,PB_5,PB_4,PA_4);
             Ds3231 rtc(PB_9, PB_8);
             epoch_time = rtc.get_epoch();
             ThisThread::sleep_for(800);
-            /* Enter Stop Mode */
+
+
             HAL_SuspendTick();
             HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+            
 
             SetSysClock();
 
@@ -182,6 +196,8 @@ int main()
             ACS712 CurrentSensor(PA_1,1,30);
             setup();       
             pc.printf("exiting sleep mode");
+        */
+             
         }          
    
     }
