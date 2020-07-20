@@ -164,23 +164,14 @@ int main()
         if(update_film_value)
         {
 
-            ThisThread::sleep_for(200); //important to have Delay - > Give SD time to flush data.
+            ThisThread::sleep_for(250); //important to have Delay - > Give SD time to flush data.
             update_film_value = false;
             LowPowerConfiguration();
-            // Enable PWR clock
-            RCC->APB1ENR |= RCC_APB1ENR_PWREN;
-            // Clear previous wakeup event
-            PWR->CR |= (PWR_CR_CSBF);
-            // Enable WKUP2 (PC_13)
-            PWR->CSR |= PWR_CSR_EWUP2;
-            // Enter Standby Mode
-            HAL_PWR_EnterSTANDBYMode();
-
-        /*
+       
             Motor motor(PA_10,PB_3,PB_5,PB_4,PA_4);
             Ds3231 rtc(PB_9, PB_8);
             epoch_time = rtc.get_epoch();
-            ThisThread::sleep_for(800);
+            ThisThread::sleep_for(250);
 
 
             HAL_SuspendTick();
@@ -196,7 +187,7 @@ int main()
             ACS712 CurrentSensor(PA_1,1,30);
             setup();       
             pc.printf("exiting sleep mode");
-        */
+        
              
         }          
    
@@ -228,8 +219,8 @@ void logger(void const *name)
     
     while(true)
     {
-        
-        epoch_time = rtc.get_epoch();
+        epoch_time = rtc.get_epoch();   
+       
         if(loggerSema.try_acquire_until(20000))
         {
             if (!sdopened)
@@ -273,7 +264,7 @@ void logger(void const *name)
 
             encoder.reset();
             t.reset();
-            ThisThread::sleep_for(100);
+            ThisThread::sleep_for(20);
         
             if(motor._MState == MFORWARD)
             {
@@ -325,7 +316,7 @@ void end_flush(void)
         t.stop(); 
        
         update_film_value = true;  
-        flush_end.attach(&end_flush, 0.1); //timeout - duration of flush
+        flush_end.attach(&end_flush, 1); //timeout - duration of flush
     }
    
 }
@@ -352,6 +343,7 @@ void SystemStates_thread(void const *name)
     {
     case S_RUN:
       sysState_struct.sysMode = S_RUN;
+      
       
     break;
 
