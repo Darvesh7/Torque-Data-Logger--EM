@@ -54,10 +54,12 @@ int flush_count = 0;
 
 Semaphore motorSema(1);
 Semaphore loggerSema(1);
+Semaphore timestampSema(1);
 
 void SystemStates_thread(void const *name);
 void motorDrive_thread(void const *name); 
 void logger(void const *name);
+void timestamp(void const *name);
 
 Thread t1;
 Thread t2;
@@ -66,6 +68,7 @@ Thread loggerThread;
 EventFlags stateChanged;
 EventQueue queue;
 LowPowerTimeout  flush_end;
+Thread timestampThread;
 
 FILE * fd;
 
@@ -121,6 +124,7 @@ void setup()
     t1.start(callback(motorDrive_thread, (void *)"MotorDriveThread"));
     t2.start(callback(SystemStates_thread, (void *)"SystemStateThread"));
     loggerThread.start(callback(logger, (void *)"DataLoggerThread"));
+    timestampThread.start(callback(timestamp,(void*)"TimeStampThread"));
 
     sysState_struct.sysMode = S_RUN;
   
@@ -156,7 +160,7 @@ int main()
     init_SD();
     setup(); 
     Flush_button.fall(&start_flush);
-    Flush_button.rise(&end_flush);  
+    //Flush_button.rise(&end_flush);  
 
 
     while (true) 
@@ -174,13 +178,13 @@ int main()
             ThisThread::sleep_for(250);
 
 
-            HAL_SuspendTick();
-            HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+            //HAL_SuspendTick();
+            //HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
             
 
-            SetSysClock();
+            //SetSysClock();
 
-            HAL_ResumeTick();
+            //HAL_ResumeTick();
         
 
             AnalogIn voltagePin(PA_0);
@@ -196,12 +200,6 @@ int main()
 }
 
 
-
-
-
-
-
-
 bool sdopened = false;
 
 void logger(void const *name)
@@ -211,7 +209,7 @@ void logger(void const *name)
     volatile float current = 0.0;
     volatile int pulses = 0;
     volatile float rpm = 0.0;
-    float RpmRatioConversion = ((600/32)*(1/149.25));
+    float RpmRatioConversion = ((1050/32)*(1/149.25));
     volatile float power = 0.0;
     volatile float torque = 0.0;
 
@@ -235,10 +233,10 @@ void logger(void const *name)
 
             voltage = voltagePin.read_u16() * (16.70 / 65535.00);
             current = abs(CurrentSensor);
-            pulses = encoder.getPulses();
+            pulses = abs(encoder.getPulses());
             currenttime = t.read_ms();
             rpm = (pulses*RpmRatioConversion);
-            power = voltage*current;
+            power = voltage*current*0.3;
             torque = ((power/(2*3.14*rpm)) * 60);
 
 
@@ -264,7 +262,7 @@ void logger(void const *name)
 
             encoder.reset();
             t.reset();
-            ThisThread::sleep_for(20);
+            ThisThread::sleep_for(50);
         
             if(motor._MState == MFORWARD)
             {
@@ -287,6 +285,18 @@ void logger(void const *name)
 }
 
 
+void timestamp(void const *name)
+{
+    while(1)
+    {
+        timestampSema.acquire();
+        epoch_time = rtc.get_epoch();
+    }
+}
+
+
+
+
 void start_flush(void)
 {
     //VoltageThread.start(getVoltage);
@@ -300,7 +310,7 @@ void start_flush(void)
             t.start();
             motorSema.release();
             loggerSema.release();
-            flush_end.attach(&end_flush, 4.0); //timeout - duration of flush
+            flush_end.attach(&end_flush, 2.0); //timeout - duration of flush
        
         }
     }

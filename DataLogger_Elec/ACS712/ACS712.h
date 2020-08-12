@@ -40,7 +40,7 @@ float ACS712::translate(float val)
         case 20:
             return (val*ratio - 2.44*ratio)/(.1*ratio);
         case 30:
-            return (val*ratio - 2.38*ratio)/(.066*ratio);
+            return (val*ratio - 2.48*ratio)/(.066*ratio);
         default:
             return 999;
     }
