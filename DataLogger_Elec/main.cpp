@@ -310,7 +310,7 @@ void start_flush(void)
             t.start();
             motorSema.release();
             loggerSema.release();
-            flush_end.attach(&end_flush, 2.0); //timeout - duration of flush
+            flush_end.attach(&end_flush, 1.0); //timeout - duration of flush
        
         }
     }
